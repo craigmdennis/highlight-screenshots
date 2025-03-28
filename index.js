@@ -2,12 +2,22 @@ const puppeteer = require("puppeteer");
 const fs = require("fs");
 const path = require("path");
 
+const args = process.argv.slice(2);
+const showHighlights = !args.includes("--no-highlight");
+const viewportArg = args.find((arg) => arg.startsWith("--viewport="));
+const [viewportWidth, viewportHeight] = viewportArg
+  ? viewportArg.split("=")[1].split("x").map(Number)
+  : [1440, 900];
+
+const urlArg = args.find((arg) => arg.startsWith("--url="));
+const targetUrl = urlArg ? urlArg.split("=")[1] : "https://example.com";
+
 (async () => {
   const browser = await puppeteer.launch({ headless: false });
   const page = await browser.newPage();
-  await page.setViewport({ width: 1440, height: 900 });
+  await page.setViewport({ width: viewportWidth, height: viewportHeight });
 
-  await page.goto("https://example.com");
+  await page.goto(targetUrl);
   console.log(
     "Please log in manually. Press any key in the terminal to begin tracking clicks..."
   );
@@ -23,42 +33,46 @@ const path = require("path");
   );
 
   await page.exposeFunction("notifyClick", async (x, y) => {
-    await page.evaluate(
-      ({ x, y }) => {
-        // Remove previous markers
-        document
-          .querySelectorAll(".puppeteer-click-marker")
-          .forEach((el) => el.remove());
+    if (showHighlights) {
+      await page.evaluate(
+        ({ x, y }) => {
+          // Remove previous markers
+          document
+            .querySelectorAll(".puppeteer-click-marker")
+            .forEach((el) => el.remove());
 
-        const marker = document.createElement("div");
-        marker.className = "puppeteer-click-marker";
-        marker.style.position = "absolute";
-        marker.style.width = "20px";
-        marker.style.height = "20px";
-        marker.style.borderRadius = "50%";
-        marker.style.background = "rgba(255, 0, 0, 0.5)";
-        marker.style.left = `${x - 10}px`;
-        marker.style.top = `${y - 10}px`;
-        marker.style.zIndex = 9999;
-        marker.style.pointerEvents = "none";
-        marker.style.border = "2px solid red";
-        document.body.appendChild(marker);
-      },
-      { x, y }
-    );
+          const marker = document.createElement("div");
+          marker.className = "puppeteer-click-marker";
+          marker.style.position = "absolute";
+          marker.style.width = "20px";
+          marker.style.height = "20px";
+          marker.style.borderRadius = "50%";
+          marker.style.background = "rgba(255, 0, 0, 0.5)";
+          marker.style.left = `${x - 10}px`;
+          marker.style.top = `${y - 10}px`;
+          marker.style.zIndex = 9999;
+          marker.style.pointerEvents = "none";
+          marker.style.border = "2px solid red";
+          document.body.appendChild(marker);
+        },
+        { x, y }
+      );
+    }
 
     console.log(
       `📸 Click registered at (${x}, ${y}) — capturing screenshot...`
     );
 
     try {
+      const scrollY = Math.max(0, y - viewportHeight / 2);
+      await page.evaluate((scrollY) => window.scrollTo(0, scrollY), scrollY);
       await new Promise((resolve) => setTimeout(resolve, 500));
       const dateDir = new Date().toISOString().split("T")[0];
       const dirPath = path.join(__dirname, "screenshots", dateDir);
       if (!fs.existsSync(dirPath)) fs.mkdirSync(dirPath, { recursive: true });
 
       const filePath = path.join(dirPath, `screenshot-${Date.now()}.png`);
-      await page.screenshot({ path: filePath, fullPage: true });
+      await page.screenshot({ path: filePath });
       console.log(`✅ Screenshot saved: ${filePath}`);
     } catch (err) {
       console.error("❌ Screenshot failed:", err);
